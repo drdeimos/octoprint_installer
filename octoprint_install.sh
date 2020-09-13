@@ -2,21 +2,24 @@
 
 set -e
 
-export HOMEDIR="/home/octo"
-export DISTRIBUTOR="$(/usr/bin/lsb_release -is)"
+HOMEDIR="/home/octo"
+DISTRIBUTOR="$(/usr/bin/lsb_release -is)"
+RELEASE="$(lsb_release -rs)"
+
+export HOMEDIR DISTRIBUTOR RELEASE
 
 function echo_yellow {
-  TEXT="${@}"
+  TEXT="${*}"
   echo -e "\e[33m${TEXT}\e[0m"
 }
 
 function echo_green {
-  TEXT="${@}"
+  TEXT="${*}"
   echo -e "\e[32m${TEXT}\e[0m"
 }
 
 function echo_red {
-  TEXT="${@}"
+  TEXT="${*}"
   echo -e "\e[31m${TEXT}\e[0m"
 }
 
@@ -26,7 +29,7 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 case $DISTRIBUTOR in
-  Debian|Ubuntu)
+  Debian|Ubuntu|LinuxMint)
     echo_green "# Detected distributior: ${DISTRIBUTOR}"
     ;;
   *)
@@ -39,10 +42,33 @@ function setup_venv {
   set -e
   mkdir ${HOMEDIR}/OctoPrint
   cd ${HOMEDIR}/OctoPrint
-  virtualenv -p /usr/bin/python3 --quiet venv
-  source venv/bin/activate
-  pip install pip --upgrade
-  pip install octoprint
+  case "${DISTRIBUTOR}" in
+    LinuxMint)
+      case "${RELEASE}" in
+        18.*)
+          export PATH="${HOME}/.local/bin/:${PATH}"
+          pip3.8 install virtualenv
+          virtualenv -p /usr/local/bin/python3.8 --quiet venv
+          source venv/bin/activate
+          pip3.8 install pip --upgrade
+          pip3.8 install octoprint
+        ;;
+        *)
+          virtualenv -p /usr/bin/python3 --quiet venv
+          source venv/bin/activate
+          pip install pip --upgrade
+          pip install octoprint
+        ;;
+      esac
+    ;;
+    *)
+      virtualenv -p /usr/bin/python3 --quiet venv
+      source venv/bin/activate
+      pip install pip --upgrade
+      pip install octoprint
+    ;;
+  esac
+
 }
 
 export -f setup_venv
@@ -55,7 +81,7 @@ if [ -d "${HOMEDIR}" ]; then
         echo_yellow "# Delete user octo and $HOMEDIR folder"
         userdel -r octo
     else
-        echo_red "User octo already exist. Installation stoped"
+        echo_red "# User octo already exist. Installation stoped"
         exit
     fi
 fi
@@ -67,7 +93,7 @@ echo_yellow "# Please password for octo user"
 passwd octo
 
 echo_yellow "# Install package dependencies"
-apt-get update
+# apt-get update
 # Python dependencies
 case $DISTRIBUTOR in
   Ubuntu|Debian)
@@ -83,6 +109,55 @@ case $DISTRIBUTOR in
       zlib1g-dev \
       virtualenv
     ;;
+  LinuxMint)
+    case "${RELEASE}" in
+      18.*)
+        echo_yellow '# WARNING!!! 18.* based on outdated Ubuntu 16.04. We strogly recommend upgrade OS!'
+        echo_yellow '# Install dependencies for compile python 3.8'
+        apt-get -y install \
+          build-essential \
+          checkinstall \
+          curl \
+          git \
+          libbz2-dev \
+          libc6-dev \
+          libffi-dev \
+          libgdbm-dev \
+          libncursesw5-dev \
+          libreadline-gplv2-dev \
+          libsqlite3-dev \
+          libssl-dev \
+          libyaml-dev \
+          sudo \
+          tk-dev \
+          zlib1g-dev
+        echo_yellow '# Download and compile python 3.8'
+        rm -rf /tmp/Python-3.8.5*
+        wget https://www.python.org/ftp/python/3.8.5/Python-3.8.5.tar.xz \
+          -O /tmp/Python-3.8.5.tar.xz
+        cd /tmp
+        tar -xf /tmp/Python-3.8.5.tar.xz
+        cd /tmp/Python-3.8.5/
+        ./configure
+        make
+        echo_yellow '# Install python 3.8'
+        make install
+      ;;
+      *)
+        apt-get -y install \
+          build-essential \
+          curl \
+          git \
+          libyaml-dev \
+          python3-dev \
+          python3-pip \
+          python3-setuptools \
+          python3-virtualenv \
+          zlib1g-dev \
+          virtualenv
+      ;;
+    esac
+    ;;
 esac
 # ffmpeg && mjpg-streamer build dependencies
 case $DISTRIBUTOR in
@@ -96,7 +171,7 @@ case $DISTRIBUTOR in
       libv4l-dev \
       sudo
     ;;
-  Ubuntu)
+  Ubuntu|LinuxMint)
     apt-get -y install \
       cmake \
       ffmpeg \
@@ -138,17 +213,17 @@ chmod +x /usr/local/bin/webcamDaemon
 
 systemctl daemon-reload
 
-for SERVICE in $(echo octoprint webcam); do
+for SERVICE in octoprint webcam; do
   set +e
-  systemctl enable ${SERVICE}.service
-  systemctl start ${SERVICE}.service
+  systemctl enable "${SERVICE}.service"
+  systemctl start "${SERVICE}.service"
   sleep 10
-  systemctl is-active --quiet ${SERVICE}.service
-  if [ $? -ne 0 ]; then
+  systemctl is-active --quiet "${SERVICE}.service"
+  if systemctl is-active --quiet "${SERVICE}.service"; then
+    echo_green "# Service ${SERVICE} OK."
+  else
     echo_red "# Service ${SERVICE} not running! Check it:"
     echo_red "# Run for logs: journalctl --no-pager -b -u ${SERVICE}.service"
-  else
-    echo_green "# Service ${SERVICE} OK."
   fi
 done
 

@@ -3,6 +3,7 @@
 Octoprint installer for:
 * Armbian systems based on Debian Buster
 * Ubuntu based (tested on 18.04)
+* LinuxMint (18.3)
 
 # How-to install
 
