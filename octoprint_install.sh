@@ -4,9 +4,16 @@ set -e
 
 HOMEDIR="/home/octo"
 DISTRIBUTOR="$(/usr/bin/lsb_release -is)"
-RELEASE="$(lsb_release -rs)"
+RELEASE="$(lsb_release -cs)"
+UNSTABLE_INSTALL=false
+UNSTABLE_PYTHON=false
 
-export HOMEDIR DISTRIBUTOR RELEASE
+export HOMEDIR \
+       DISTRIBUTOR \
+       RELEASE \
+       UNSTABLE_INSTALL \
+       UNSTABLE_PYTHON_COMPILE \
+       UNSTABLE_PYTHON_PACKAGE
 
 function echo_yellow {
   TEXT="${*}"
@@ -23,14 +30,67 @@ function echo_red {
   echo -e "\e[31m${TEXT}\e[0m"
 }
 
+function question_unstable {
+  echo_yellow "# Detected unstable distributior version: ${DISTRIBUTOR} ${RELEASE}"
+  echo_yellow '# Installation on your distribution may be unstable or completely broken'
+  echo_yellow '# We are STRONGLY recommend upgrade your OS to supported version'
+  while true; do
+    read -p "# Do you REALLY want to continue installation? (Y or N)" ANSWER_CONTINUE
+    case $ANSWER_CONTINUE in
+      [Yy]*)
+             UNSTABLE_INSTALL=true
+             export UNSTABLE_INSTALL
+             break
+             while true; do
+               echo_yellow '# 1 - Try use python3 package from your distribution'
+               echo_yellow '# 2 - Compile Python 3.8.5'
+               read -p "# Please answer:" ANSWER_PYTHON
+               case $ANSWER_PYTHON in
+                 1)
+                   UNSTABLE_PYTHON=package
+                   export UNSTABLE_PYTHON_PACKAGE
+                 ;;
+                 2)
+                   UNSTABLE_PYTHON=compile
+                   export UNSTABLE_PYTHON_COMPILE
+                 ;;
+               esac
+             done
+      ;;
+      [Nn]*)
+            exit;;
+      *)
+        echo "Please answer yes or no."
+      ;;
+    esac
+  done
+}
+
 if [ "$EUID" -ne 0 ]; then
   echo_red "# Please run as root"
   exit 1
 fi
 
 case $DISTRIBUTOR in
-  Debian|Ubuntu|LinuxMint)
-    echo_green "# Detected distributior: ${DISTRIBUTOR}"
+  Debian|Ubuntu)
+    case "${RELEASE}" in
+      bionic|cosmic|disco|eoam|focal|groovy|stretch|buster)
+        echo_green "# Detected stable distributior version: ${DISTRIBUTOR} ${RELEASE}"
+      ;;
+      *)
+        question_unstable
+      ;;
+    esac
+    ;;
+  LinuxMint)
+    case "${RELEASE}" in
+      Tara|Tessa|Tina|Tricia|Ulyana)
+        echo_green "# Detected stable distributior version: ${DISTRIBUTOR} ${RELEASE}"
+      ;;
+      *)
+        question_unstable
+      ;;
+    esac
     ;;
   *)
     echo_red "# Unsupported distributor: ${DISTRIBUTOR}"
@@ -42,33 +102,22 @@ function setup_venv {
   set -e
   mkdir ${HOMEDIR}/OctoPrint
   cd ${HOMEDIR}/OctoPrint
-  case "${DISTRIBUTOR}" in
-    LinuxMint)
-      case "${RELEASE}" in
-        18.*)
-          export PATH="${HOME}/.local/bin/:${PATH}"
-          pip3.8 install virtualenv
-          virtualenv -p /usr/local/bin/python3.8 --quiet venv
-          source venv/bin/activate
-          pip3.8 install pip --upgrade
-          pip3.8 install octoprint
-        ;;
-        *)
-          virtualenv -p /usr/bin/python3 --quiet venv
-          source venv/bin/activate
-          pip install pip --upgrade
-          pip install octoprint
-        ;;
-      esac
+  case "${UNSTABLE_PYTHON}" in
+    compile)
+      export PATH="${HOME}/.local/bin/:${PATH}"
+      pip3.8 install virtualenv
+      virtualenv -p /usr/local/bin/python3.8 --quiet venv
+      source venv/bin/activate
+      pip3.8 install pip --upgrade
+      pip3.8 install octoprint
     ;;
-    *)
+    package)
       virtualenv -p /usr/bin/python3 --quiet venv
       source venv/bin/activate
       pip install pip --upgrade
       pip install octoprint
     ;;
   esac
-
 }
 
 export -f setup_venv
@@ -76,13 +125,12 @@ export -f setup_venv
 if [ -d "${HOMEDIR}" ]; then
     read -p "User octo already exist, delete user and continue? (Y/n)" -n 1 -r
     echo    # (optional) move to a new line
-    if [[ $REPLY =~ ^[Yy]$ ]]
-    then
-        echo_yellow "# Delete user octo and $HOMEDIR folder"
-        userdel -r octo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      echo_yellow "# Delete user octo and $HOMEDIR folder"
+      userdel -r octo
     else
-        echo_red "# User octo already exist. Installation stoped"
-        exit
+      echo_red "# User octo already exist. Installation stoped"
+      exit
     fi
 fi
 
